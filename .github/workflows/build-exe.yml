@@ -1,5 +1,11 @@
 name: Build and Publish Windows Executable 🖥️
-on: push
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    # 每天UTC时间0:00自动运行（相当于北京时间8:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
 jobs:
   build-windows:
     name: Build Windows executable 🖥️
@@ -35,10 +41,9 @@ jobs:
 
   publish-to-github:
     name: Publish Windows Executable to GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')  # only publish on tag pushes
     needs:
       - build-windows
-    runs-on: ubuntu-latest
+    runs-on: windows-latest  # 改为在Windows上运行，与构建环境一致
     permissions:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
     steps:
@@ -48,33 +53,41 @@ jobs:
           name: windows-executable
           path: dist/
 
+      - name: Get current date
+        id: date
+        run: echo "::set-output name=date::$(date +'%Y%m%d')"
+        shell: bash
+
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create
-          '${{ github.ref_name }}'
-          --repo '${{ github.repository }}'
-          --notes "PPOCRLabel Windows Executable Release ${{ github.ref_name }}"
+        run: |
+          $VERSION="v$(Get-Date -Format 'yyyy.MM.dd')"
+          $RELEASE_EXISTS=(gh release view $VERSION --repo ${{ github.repository }} 2>&1 | Select-String "release not found" -Quiet)
+          
+          if ($RELEASE_EXISTS) {
+            gh release create $VERSION --repo ${{ github.repository }} --notes "PPOCRLabel Windows Executable Release $VERSION (Auto-build)"
+          } else {
+            gh release delete $VERSION --yes --repo ${{ github.repository }}
+            gh release create $VERSION --repo ${{ github.repository }} --notes "PPOCRLabel Windows Executable Release $VERSION (Auto-build)"
+          }
 
       - name: Upload executable to GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload
-          '${{ github.ref_name }}' dist/*.exe
-          --repo '${{ github.repository }}'
+        run: |
+          $VERSION="v$(Get-Date -Format 'yyyy.MM.dd')"
+          gh release upload $VERSION dist/*.exe --repo ${{ github.repository }} --clobber
 
       - name: Generate SHA256 checksums
         run: |
           cd dist
-          sha256sum *.exe > SHA256SUMS.txt
+          Get-FileHash -Algorithm SHA256 *.exe | Out-File -FilePath SHA256SUMS.txt
           cd ..
 
       - name: Upload checksums to GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload
-          '${{ github.ref_name }}' dist/SHA256SUMS.txt
-          --repo '${{ github.repository }}'
+        run: |
+          $VERSION="v$(Get-Date -Format 'yyyy.MM.dd')"
+          gh release upload $VERSION dist/SHA256SUMS.txt --repo ${{ github.repository }} --clobber
