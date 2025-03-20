@@ -1,0 +1,80 @@
+name: Build and Publish Windows Executable 🖥️
+on: push
+jobs:
+  build-windows:
+    name: Build Windows executable 🖥️
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+          pip install paddle
+          pip install paddleocr
+
+      - name: Regenerate Resources (if using PyQt)
+        run: |
+          pip install pyqt5
+          pyrcc5 -o libs/resources.py resources.qrc
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller -c PPOCRLabel.py --collect-all paddleocr --collect-all pyclipper --collect-all imghdr --collect-all skimage --collect-all imgaug --collect-all scipy.io --collect-all lmdb --collect-all paddle --hidden-import=pyqt5 -p ./libs -p ./ -p ./data -p ./resources -F
+
+      - name: Store the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executable
+          path: dist/*.exe
+
+  publish-to-github:
+    name: Publish Windows Executable to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')  # only publish on tag pushes
+    needs:
+      - build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # IMPORTANT: mandatory for making GitHub Releases
+    steps:
+      - name: Download the executable
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-executable
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create
+          '${{ github.ref_name }}'
+          --repo '${{ github.repository }}'
+          --notes "PPOCRLabel Windows Executable Release ${{ github.ref_name }}"
+
+      - name: Upload executable to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload
+          '${{ github.ref_name }}' dist/*.exe
+          --repo '${{ github.repository }}'
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          sha256sum *.exe > SHA256SUMS.txt
+          cd ..
+
+      - name: Upload checksums to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload
+          '${{ github.ref_name }}' dist/SHA256SUMS.txt
+          --repo '${{ github.repository }}'
